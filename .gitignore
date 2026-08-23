@@ -1,5 +1,8 @@
-# Cached models to prevent unnecessary downloads
+# Cached modelsto prevent unnecessary downloads
 .cache/
+
+# Large GSE dataset
+data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
