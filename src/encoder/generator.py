@@ -59,14 +59,6 @@ class EncoderGenerator:
         tokenizer.save_pretrained(save_path)
 
 
-
-# tokenizer = AutoTokenizer.from_pretrained("multimolecule/utrlm-mrl")
-# model = AutoModel.from_pretrained("multimolecule/utrlm-mrl")
-
-# inputs = tokenizer("UAGCUUAUCAGACUGAUGUUGA", return_tensors="pt")
-# outputs = model(**inputs)
-# embeddings = outputs.last_hidden_state
-
 if __name__ == "__main__":
     # Example usage and output embeddings for a given sequence
     import argparse

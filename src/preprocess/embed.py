@@ -31,6 +31,7 @@ def compute_and_save_chunk_embeddings(
 
             outputs = model(input_ids=input_ids, attention_mask=attention_mask)
             # choose pooling strategy, e.g., mean pooling
+            # NOTE: This is deprecated, remove pooler output usage
             if hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
                 pooled = outputs.pooler_output  # (B, H)
             else:

@@ -6,7 +6,8 @@ from src.encoder.generator import EncoderGenerator, RNAEncoder
 from src.preprocess.embed import compute_and_save_chunk_embeddings
 
 def load_dataset_in_chunks(
-    file_path: str, 
+    file_path: str,
+    encoder: RNAEncoder,
     chunk_size: int = 10000,
     test_size: float = 0.05
 ) -> pd.DataFrame:
@@ -23,7 +24,12 @@ def load_dataset_in_chunks(
     # Save the full dataframe vector embeddings for all encoders
     file_name = os.path.basename(file_path).split('.')[0]
     full_df = full_df.reset_index(drop=True) # ensure index order is consistent across runs
-    save_vector_embeddings(full_df, save_path=f'./data/embeddings/{file_name}')
+    compute_and_save_chunk_embeddings(
+        full_df['UTR'].tolist(),
+        out_dir=f'./data/embeddings/{file_name}',
+        encoder=encoder,
+        chunk_index = 0
+    )
     # train-test split
     test_set = full_df.nlargest(int(len(full_df) * test_size), 't0')
     train_set = full_df.drop(test_set.index)
@@ -40,20 +46,16 @@ def load_dataset_in_chunks(
     train_set.to_csv(f'{save_path}/train_set.csv', index=False)
     test_set.to_csv(f'{save_path}/test_set.csv', index=False)
 
-def save_vector_embeddings(df: pd.DataFrame, save_path: str) -> None:
-    for encoder in RNAEncoder:
-        compute_and_save_chunk_embeddings(
-            df['UTR'].tolist(),
-            out_dir=save_path,
-            encoder=encoder,
-            chunk_index = 0
-        )
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Process a dataset in chunks.")
     parser.add_argument("--file_path", type=str, required=True, help="Path to the CSV file to process.")
+    parser.add_argument("--encoder", type=str, default="UTRLM", help="The RNA encoder to use (e.g., RNAFM, MRNAFM, ERNIERNA, etc.).")
     parser.add_argument("--chunk_size", type=int, default=10000, help="Number of rows per chunk.")
     args = parser.parse_args()
 
-    load_dataset_in_chunks(args.file_path, args.chunk_size)
+    assert args.encoder in RNAEncoder.__members__, f"Invalid encoder. Choose from: {list(RNAEncoder.__members__.keys())}"
+
+    encoder = RNAEncoder[args.encoder]
+    load_dataset_in_chunks(args.file_path, encoder, chunk_size=args.chunk_size)
