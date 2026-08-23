@@ -1,9 +1,18 @@
-import os
+import os, time
 from pathlib import Path
 import numpy as np
 import torch
 
 from src.encoder.generator import EncoderGenerator, RNAEncoder
+
+def choose_torch_device() -> torch.device:
+    """Choose appropriate torch device based on the hardware."""
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    elif torch.backends.mps.is_available():
+        return torch.device("mps")
+    else:
+        return torch.device("cpu")
 
 def compute_and_save_chunk_embeddings(
     sequences: list[str],
@@ -13,7 +22,7 @@ def compute_and_save_chunk_embeddings(
     batch_size: int = 64,
     device: torch.device = None
 ):
-    device = device or (torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu"))
+    device = device or choose_torch_device()
     encoder_generator = EncoderGenerator(encoder)
     model, tokenizer = encoder_generator.load_encoder_and_tokenizer()
     model.to(device)
@@ -21,7 +30,10 @@ def compute_and_save_chunk_embeddings(
 
     all_embs = []
     with torch.no_grad():
-        for i in range(0, len(sequences), batch_size):
+        # Introduce verbose
+        t0 = time.time(); done = 0; total = len(sequences)
+        # Process sequences in batches
+        for bi,i in enumerate(range(0, len(sequences), batch_size)):
             batch_sequences = sequences[i:i + batch_size]
             inputs = tokenizer(batch_sequences, return_tensors="pt", padding=True, truncation=True)
             input_ids = inputs['input_ids'].to(device)
@@ -45,6 +57,15 @@ def compute_and_save_chunk_embeddings(
                     pooled = last_hidden.mean(dim=1)
 
             all_embs.append(pooled.cpu().numpy().astype(np.float32))
+
+            # Verbose output
+            done += len(sequences[i:i+batch_size])
+            if bi % 20 == 0 or done == total:
+                el   = time.time() - t0
+                rate = done / el
+                eta  = (total - done) / rate
+                print(f"  [{encoder.value}] {done:>7,}/{total:,} ({done/total*100:5.1f}%) "
+                    f"| {rate:6.0f} seq/s | elapsed {el:5.1f}s | eta {eta:6.1f}s", flush=True)
 
     if all_embs:
         all_embs = np.vstack(all_embs)
