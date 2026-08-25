@@ -42,19 +42,15 @@ def compute_and_save_chunk_embeddings(
                 attention_mask = attention_mask.to(device)
 
             outputs = model(input_ids=input_ids, attention_mask=attention_mask)
-            # choose pooling strategy, e.g., mean pooling
-            # NOTE: This is deprecated, remove pooler output usage
-            if hasattr(outputs, "pooler_output") and outputs.pooler_output is not None:
-                pooled = outputs.pooler_output  # (B, H)
+            
+            last_hidden = outputs.last_hidden_state  # (B, L, H)
+            if attention_mask is not None:
+                mask = attention_mask.unsqueeze(-1).type_as(last_hidden)
+                summed = (last_hidden * mask).sum(dim=1)
+                denom = mask.sum(dim=1).clamp(min=1e-9)
+                pooled = summed / denom
             else:
-                last_hidden = outputs.last_hidden_state  # (B, L, H)
-                if attention_mask is not None:
-                    mask = attention_mask.unsqueeze(-1).type_as(last_hidden)
-                    summed = (last_hidden * mask).sum(dim=1)
-                    denom = mask.sum(dim=1).clamp(min=1e-9)
-                    pooled = summed / denom
-                else:
-                    pooled = last_hidden.mean(dim=1)
+                pooled = last_hidden.mean(dim=1)
 
             all_embs.append(pooled.cpu().numpy().astype(np.float32))
 
