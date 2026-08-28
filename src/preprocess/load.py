@@ -10,7 +10,7 @@ def load_dataset_in_chunks(
     encoder: RNAEncoder,
     chunk_size: int = 10000,
     test_size: float = 0.05
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Load the dataset from a csv file."""
     full_df = pd.DataFrame()
     for chunk in pd.read_csv(file_path, chunksize=chunk_size):
@@ -30,6 +30,9 @@ def load_dataset_in_chunks(
         encoder=encoder,
         chunk_index = 0
     )
+    print(f"Embeddings have been generated for {encoder.name}")
+    # index rows before saving
+    full_df['emb_idx'] = np.arange(len(full_df))
     # train-test split
     test_set = full_df.nlargest(int(len(full_df) * test_size), 't0')
     train_set = full_df.drop(test_set.index)
@@ -45,6 +48,9 @@ def load_dataset_in_chunks(
     os.makedirs(save_path, exist_ok=True)
     train_set.to_csv(f'{save_path}/train_set.csv', index=False)
     test_set.to_csv(f'{save_path}/test_set.csv', index=False)
+    print(f"Saved the final datasets to '{save_path}'.")
+    # Return the final data frames
+    return train_set, test_set
 
 
 if __name__ == "__main__":
