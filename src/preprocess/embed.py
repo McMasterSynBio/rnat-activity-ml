@@ -18,10 +18,18 @@ def compute_and_save_chunk_embeddings(
     sequences: list[str],
     out_dir: str,
     encoder: RNAEncoder,
-    chunk_index: int,
     batch_size: int = 64,
     device: torch.device = None
 ):
+    # Check if file already exists, return if it does
+    encoder_name = encoder.value.split('/')[-1]
+    encoder_dir = Path(out_dir) / encoder_name
+    encoder_dir.mkdir(parents=True, exist_ok=True)
+    out_path = encoder_dir / f"{encoder_name}.npy"
+    if os.path.isfile(out_path):
+        return
+    
+    # Define torch device and config
     device = device or choose_torch_device()
     encoder_generator = EncoderGenerator(encoder)
     model, tokenizer = encoder_generator.load_encoder_and_tokenizer()
@@ -68,9 +76,6 @@ def compute_and_save_chunk_embeddings(
     else:
         all_embs = np.zeros((0, model.config.hidden_size), dtype=np.float32)
 
-    encoder_name = encoder.value.split('/')[-1]
-    encoder_dir = Path(out_dir) / encoder_name
-    encoder_dir.mkdir(parents=True, exist_ok=True)
-    out_path = encoder_dir / f"{encoder_name}_chunk{chunk_index}.npy"
+    # Save the computed embeddings
     np.save(str(out_path), all_embs)
     return out_path, all_embs.shape

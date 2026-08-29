@@ -9,9 +9,11 @@ dependencies = [
     "matplotlib>=3.11.1",
     "multimolecule>=0.2.1",
     "numpy>=2.5.2",
+    "nupack>=4.0.2.1",
     "pandas>=3.0.5",
     "seaborn>=0.13.2",
     "torch>=2.13.0",
     "transformers>=5.15.1",
     "unpack>=0.0.8",
+    "viennarna>=2.7.2",
 ]

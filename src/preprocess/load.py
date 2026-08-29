@@ -28,7 +28,6 @@ def load_dataset_in_chunks(
         full_df['UTR'].tolist(),
         out_dir=f'./data/embeddings/{file_name}',
         encoder=encoder,
-        chunk_index = 0
     )
     print(f"Embeddings have been generated for {encoder.name}")
     # index rows before saving
