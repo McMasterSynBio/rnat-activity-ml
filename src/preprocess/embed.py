@@ -26,8 +26,8 @@ def compute_and_save_chunk_embeddings(
     encoder_dir = Path(out_dir) / encoder_name
     encoder_dir.mkdir(parents=True, exist_ok=True)
     out_path = encoder_dir / f"{encoder_name}.npy"
-    if os.path.isfile(out_path):
-        return
+    # if os.path.isfile(out_path): # TODO: Fix Logic
+    #     return
     
     # Define torch device and config
     device = device or choose_torch_device()

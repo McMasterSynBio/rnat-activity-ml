@@ -4,6 +4,7 @@ import os
 
 from src.encoder.generator import EncoderGenerator, RNAEncoder
 from src.preprocess.embed import compute_and_save_chunk_embeddings
+from src.preprocess.exposure import compute_and_save_exposure
 
 def load_dataset_in_chunks(
     file_path: str,
@@ -30,6 +31,12 @@ def load_dataset_in_chunks(
         encoder=encoder,
     )
     print(f"Embeddings have been generated for {encoder.name}")
+    # concatenate dataset with nupack thermodynamics features
+    feats = compute_and_save_exposure(
+        full_df['UTR'].tolist(),
+        out_dir=f'./data/exposure/{file_name}'
+    )
+    full_df = pd.concat([full_df, feats], axis=1)
     # index rows before saving
     full_df['emb_idx'] = np.arange(len(full_df))
     # train-test split
@@ -55,7 +62,7 @@ def load_dataset_in_chunks(
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Process a dataset in chunks.")
-    parser.add_argument("--file_path", type=str, required=True, help="Path to the CSV file to process.")
+    parser.add_argument("--file_path", type=str, default="./data/raw/GSM2793752_Random_UTRs.csv.gz", help="Path to the CSV file to process.")
     parser.add_argument("--encoder", type=str, default="UTRLM", help="The RNA encoder to use (e.g., RNAFM, MRNAFM, ERNIERNA, etc.).")
     parser.add_argument("--chunk_size", type=int, default=10000, help="Number of rows per chunk.")
     args = parser.parse_args()
