@@ -1,6 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
+from pathlib import Path
 
 from src.encoder.generator import EncoderGenerator, RNAEncoder
 from src.preprocess.embed import compute_and_save_chunk_embeddings
@@ -31,10 +32,17 @@ def load_dataset_in_chunks(
         encoder=encoder,
     )
     print(f"Embeddings have been generated for {encoder.name}")
+    # if post-processing already done then skip rest of the pipeline
+    exposure_out_dir = f'./data/exposure/{file_name}'
+    read_path = f'./data/processed/{file_name}'
+    if Path(f'{read_path}/train_set.csv').exists() and Path(f'{read_path}/test_set.csv').exists():
+        train_set, test_set = pd.read_csv(f'{read_path}/train_set.csv'), pd.read_csv(f'{read_path}/test_set.csv')
+        print(f"Loaded existing processed datasets from '{read_path}'.")
+        return train_set, test_set
     # concatenate dataset with nupack thermodynamics features
     feats = compute_and_save_exposure(
         full_df['UTR'].tolist(),
-        out_dir=f'./data/exposure/{file_name}'
+        out_dir=exposure_out_dir
     )
     full_df = pd.concat([full_df, feats], axis=1)
     # index rows before saving

@@ -21,14 +21,21 @@ def compute_and_save_chunk_embeddings(
     batch_size: int = 64,
     device: torch.device = None
 ):
-    # Check if file already exists, return if it does
-    encoder_name = encoder.value.split('/')[-1]
-    encoder_dir = Path(out_dir) / encoder_name
+    encoder_dir = Path(out_dir)
     encoder_dir.mkdir(parents=True, exist_ok=True)
+    encoder_name = encoder.value.split('/')[-1]
     out_path = encoder_dir / f"{encoder_name}.npy"
-    # if os.path.isfile(out_path): # TODO: Fix Logic
-    #     return
-    
+
+    # Reuse the cache only if it has one row per input sequence
+    if os.path.isfile(out_path):
+        cached = np.load(out_path, mmap_mode='r')
+        if cached.shape[0] == len(sequences):
+            print(f"  [{encoder.value}] reusing cache: {out_path}")
+            return out_path, cached.shape
+        print(f"  [{encoder.value}] cache is stale "
+              f"({cached.shape[0]:,} != {len(sequences):,}), recomputing", flush=True)
+
+
     # Define torch device and config
     device = device or choose_torch_device()
     encoder_generator = EncoderGenerator(encoder)

@@ -46,7 +46,11 @@ def exposure_features(
     cut, which inflates unpaired probability at the 3' edge -- exactly the region
     that matters. Measured, position 49: 0.87 alone vs 0.45 with context.
     """
-    md = md or RNA.md()
+    # Default to the assay temperature, not RNA.md()'s bare 37 C -- otherwise a
+    # standalone call silently disagrees with what the batch driver wrote.
+    if md is None:
+        md = RNA.md()
+        md.temperature = ASSAY_TEMP_C
     start = len(utr)                       # index of the A in AUG, by construction
     unpaired, dG_whole = _unpaired_and_dG(utr + context, md)
     _, dG_utr = _unpaired_and_dG(utr, md)
