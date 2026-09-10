@@ -5,15 +5,16 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "argparse>=1.4.0",
     "matplotlib>=3.11.1",
     "multimolecule>=0.2.1",
     "numpy>=2.5.2",
-    "nupack>=4.0.2.1",
     "pandas>=3.0.5",
     "seaborn>=0.13.2",
     "torch>=2.13.0",
-    "transformers>=5.15.1",
-    "unpack>=0.0.8",
+    # multimolecule 0.2.1 registers its own "esmc" model type at import time;
+    # transformers>=5.16.0 ships ESM-C natively under that same name, which
+    # collides ("'esmc' is already used by a Transformers config"). Pin below
+    # that until multimolecule ships a release that accounts for it.
+    "transformers>=5.15.1,<5.16.0",
     "viennarna>=2.7.2",
 ]
