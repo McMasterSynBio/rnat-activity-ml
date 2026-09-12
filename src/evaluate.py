@@ -62,10 +62,15 @@ def evaluate_checkpoint(ckpt_path: Path, file_path: str, device, val_frac: float
     train_df, test_df, embeddings = load_processed_splits(file_name, encoder)
     _, val_df = carve_validation_split(train_df, val_frac=val_frac, seed=seed)
 
-    exposure_mean = pd.Series(ckpt["exposure_mean"])
-    exposure_std = pd.Series(ckpt["exposure_std"])
-    val_ds = ActivityDataset(val_df, embeddings, exposure_mean, exposure_std)
-    test_ds = ActivityDataset(test_df, embeddings, exposure_mean, exposure_std)
+    stats = (
+        pd.Series(ckpt["exposure_mean"]),
+        pd.Series(ckpt["exposure_std"]),
+        np.asarray(ckpt["emb_keep"], dtype=int),
+        np.asarray(ckpt["emb_mean"], dtype=np.float32),
+        np.asarray(ckpt["emb_std"], dtype=np.float32),
+    )
+    val_ds = ActivityDataset(val_df, embeddings, *stats)
+    test_ds = ActivityDataset(test_df, embeddings, *stats)
 
     model = ActivityRegressor(ckpt["input_dim"], ckpt["hidden_dims"], dropout=ckpt["dropout"]).to(device)
     model.load_state_dict(ckpt["model_state"])

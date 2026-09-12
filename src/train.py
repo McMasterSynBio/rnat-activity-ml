@@ -13,16 +13,35 @@ from src.preprocess.exposure import FEATURE_COLS as EXPOSURE_COLS
 
 TARGET_COL = "growth_rate_z"
 
+# An embedding dimension whose fit-split sd is at or below this is treated as
+# constant and dropped rather than standardized.
+MIN_EMB_SD = 1e-8
+
 
 class ActivityDataset(Dataset):
-    """This etches which rows are allocated to the train/val/test split
-    via emb_idx. The embedding dimensions are concatenated with the z-scored 
-    exposure features (i.e. always equal to number of embedding dims + 5), which is 
-    represented as x, and growth_rate_z as y. It outputs all of this as a Dataset.
+    """
+    Pairs each row of one split with its cached encoder embedding via emb_idx,
+    and z-scores both the embedding and the exposure block.
+
+    Inputs:
+    * df: one split (fit/val/test), carrying emb_idx, EXPOSURE_COLS and TARGET_COL
+    * embeddings: (n_dataset, dim) cached encoder output for the whole dataset
+    * exposure_mean / exposure_std: fit-split statistics for the 5 exposure columns
+    * emb_keep: embedding dimensions to retain, from fit_embedding_stats
+    * emb_mean / emb_std: fit-split statistics for the retained embedding dimensions
+
+    Outputs: per row, x = [standardized embedding | standardized exposure] as
+    float32 of width len(emb_keep) + 5, and y = growth_rate_z.
+
+    All five statistics must come from the fit split alone, never from val or test.
+    Standardizing the embedding block is not cosmetic: raw, its per-dimension sd
+    spans ~90x within one encoder, which drives AdamW to kill most of layer 1
+    (measured 212/256 units permanently dead on utrlm-te_el) and costs ~0.02 rho.
     """
 
-    def __init__(self, df: pd.DataFrame, embeddings: np.ndarray, exposure_mean: pd.Series, exposure_std: pd.Series):
-        emb = embeddings[df["emb_idx"].to_numpy()]
+    def __init__(self, df: pd.DataFrame, embeddings: np.ndarray, exposure_mean: pd.Series, exposure_std: pd.Series,
+                 emb_keep: np.ndarray, emb_mean: np.ndarray, emb_std: np.ndarray):
+        emb = (embeddings[df["emb_idx"].to_numpy()][:, emb_keep] - emb_mean) / emb_std
         exposure = ((df[EXPOSURE_COLS] - exposure_mean) / exposure_std).to_numpy(dtype=np.float32)
         self.x = np.concatenate([emb, exposure], axis=1).astype(np.float32)
         self.y = df[TARGET_COL].to_numpy(dtype=np.float32)
@@ -34,17 +53,50 @@ class ActivityDataset(Dataset):
         return torch.from_numpy(self.x[idx]), torch.tensor(self.y[idx])
 
 
+def fit_embedding_stats(
+    embeddings: np.ndarray,
+    fit_df: pd.DataFrame,
+    min_sd: float = MIN_EMB_SD,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Measures the fit-split mean and sd of the embedding block, and finds which
+    dimensions actually vary.
+
+    Inputs:
+    * embeddings: (n_dataset, dim) cached encoder output for the whole dataset
+    * fit_df: the fit split, used only for its emb_idx column
+    * min_sd: dimensions with sd at or below this are treated as constant
+
+    Outputs: (emb_keep, emb_mean, emb_std) for ActivityDataset, with emb_mean and
+    emb_std already restricted to the kept dimensions.
+
+    Constant dimensions come from the checkpoints themselves, not from this
+    pipeline -- RNABERT emits 4 of 120 with sd ~1e-20 in its raw hidden states --
+    and dividing by those would produce inf rather than a merely useless feature.
+    """
+    fit_emb = embeddings[fit_df["emb_idx"].to_numpy()]
+    sd = fit_emb.std(axis=0)
+    keep = np.flatnonzero(sd > min_sd)
+    return keep, fit_emb[:, keep].mean(axis=0), sd[keep]
+
+
 class ActivityRegressor(nn.Module):
-    """Nonlinear regression head on top of a frozen pretrained RNA-LM embedding.
+    """
+    Nonlinear regression head over a frozen RNA-LM embedding concatenated with
+    the thermodynamic exposure features.
 
-    The encoder embedding carries whatever sequence/structure context the LM
-    learned; the exposure features (src/preprocess/exposure.py) add the
-    assay-temperature thermodynamics the LM was never trained on. `dG_whole`
-    alone already gets a linear ridge to rho ~0.29 (see exposure.py) -- this
-    head exists so the remaining exposure features and the embedding can
-    interact nonlinearly instead of just being added on top of a linear fit.
+    Inputs:
+    * input_dim: width of the concatenated feature vector (len(emb_keep) + 5)
+    * hidden_dims: hidden layer widths; each becomes Linear -> ReLU -> Dropout
+    * dropout: dropout probability applied after every hidden activation
 
-    Sanity check: rho should never dip below 0.29.
+    Outputs: forward(x: (B, input_dim)) -> (B,) predicted growth_rate_z.
+
+    The encoder itself stays frozen; only this head learns. `dG_whole` alone
+    reaches rho ~0.29 under a linear ridge, so this head exists to let the
+    embedding and the remaining exposure features interact nonlinearly -- and
+    rho below 0.29 means something is wrong, not that the encoder is weak.
+    Inputs must arrive standardized (see ActivityDataset) or layer 1 dies.
     """
 
     def __init__(self, input_dim: int, hidden_dims: list[int], dropout: float = 0.1):
@@ -131,10 +183,15 @@ def train_model(
     # Normalize exposure features on the fit split only
     exposure_mean = fit_df[EXPOSURE_COLS].mean()
     exposure_std = fit_df[EXPOSURE_COLS].std(ddof=1).replace(0, 1.0)
+    emb_keep, emb_mean, emb_std = fit_embedding_stats(embeddings, fit_df)
+    if len(emb_keep) < embeddings.shape[1]:
+        print(f"  dropped {embeddings.shape[1] - len(emb_keep)} constant embedding dim(s): "
+              f"{np.setdiff1d(np.arange(embeddings.shape[1]), emb_keep).tolist()}")
 
-    fit_ds = ActivityDataset(fit_df, embeddings, exposure_mean, exposure_std)
-    val_ds = ActivityDataset(val_df, embeddings, exposure_mean, exposure_std)
-    test_ds = ActivityDataset(test_df, embeddings, exposure_mean, exposure_std)
+    stats = (exposure_mean, exposure_std, emb_keep, emb_mean, emb_std)
+    fit_ds = ActivityDataset(fit_df, embeddings, *stats)
+    val_ds = ActivityDataset(val_df, embeddings, *stats)
+    test_ds = ActivityDataset(test_df, embeddings, *stats)
 
     fit_loader = DataLoader(fit_ds, batch_size=batch_size, shuffle=True, drop_last=True)
     val_loader = DataLoader(val_ds, batch_size=batch_size)
@@ -186,6 +243,11 @@ def train_model(
                     # Python/tensor types, not numpy.float64 from Series.to_dict().
                     "exposure_mean": {k: float(v) for k, v in exposure_mean.items()},
                     "exposure_std": {k: float(v) for k, v in exposure_std.items()},
+                    # Embedding scaling must travel with the head: scoring a
+                    # standardized-trained model on raw embeddings is silent garbage.
+                    "emb_keep": [int(i) for i in emb_keep],
+                    "emb_mean": [float(v) for v in emb_mean],
+                    "emb_std": [float(v) for v in emb_std],
                     "epoch": epoch,
                     "val_mse": float(val_loss),
                     "val_rho": float(val_rho),
