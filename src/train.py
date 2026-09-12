@@ -17,6 +17,12 @@ TARGET_COL = "growth_rate_z"
 # constant and dropped rather than standardized.
 MIN_EMB_SD = 1e-8
 
+# Which feature blocks reach the head. "physics" and "embedding" are ablations 2
+# and 4 of the evaluation protocol: without them, "the encoder helps" cannot be
+# falsified, so the physics-only number is meant to be locked before any
+# encoder result is believed.
+FEATURE_MODES = ("fused", "embedding", "physics")
+
 
 class ActivityDataset(Dataset):
     """
@@ -29,9 +35,10 @@ class ActivityDataset(Dataset):
     * exposure_mean / exposure_std: fit-split statistics for the 5 exposure columns
     * emb_keep: embedding dimensions to retain, from fit_embedding_stats
     * emb_mean / emb_std: fit-split statistics for the retained embedding dimensions
+    * feature_mode: which blocks to include, one of FEATURE_MODES
 
-    Outputs: per row, x = [standardized embedding | standardized exposure] as
-    float32 of width len(emb_keep) + 5, and y = growth_rate_z.
+    Outputs: per row, x = the standardized blocks selected by feature_mode
+    (embedding, exposure, or both) as float32, and y = growth_rate_z.
 
     All five statistics must come from the fit split alone, never from val or test.
     Standardizing the embedding block is not cosmetic: raw, its per-dimension sd
@@ -40,10 +47,14 @@ class ActivityDataset(Dataset):
     """
 
     def __init__(self, df: pd.DataFrame, embeddings: np.ndarray, exposure_mean: pd.Series, exposure_std: pd.Series,
-                 emb_keep: np.ndarray, emb_mean: np.ndarray, emb_std: np.ndarray):
-        emb = (embeddings[df["emb_idx"].to_numpy()][:, emb_keep] - emb_mean) / emb_std
-        exposure = ((df[EXPOSURE_COLS] - exposure_mean) / exposure_std).to_numpy(dtype=np.float32)
-        self.x = np.concatenate([emb, exposure], axis=1).astype(np.float32)
+                 emb_keep: np.ndarray, emb_mean: np.ndarray, emb_std: np.ndarray, feature_mode: str = "fused"):
+        assert feature_mode in FEATURE_MODES, f"feature_mode must be one of {FEATURE_MODES}, got {feature_mode!r}"
+        blocks = []
+        if feature_mode in ("fused", "embedding"):
+            blocks.append((embeddings[df["emb_idx"].to_numpy()][:, emb_keep] - emb_mean) / emb_std)
+        if feature_mode in ("fused", "physics"):
+            blocks.append(((df[EXPOSURE_COLS] - exposure_mean) / exposure_std).to_numpy(dtype=np.float32))
+        self.x = np.concatenate(blocks, axis=1).astype(np.float32)
         self.y = df[TARGET_COL].to_numpy(dtype=np.float32)
 
     def __len__(self) -> int:
@@ -171,6 +182,7 @@ def train_model(
     seed: int = 0,
     out_dir: str = "./checkpoints",
     device: torch.device = None,
+    feature_mode: str = "fused",
 ) -> dict:
     torch.manual_seed(seed)
     device = device or choose_torch_device()
@@ -188,7 +200,7 @@ def train_model(
         print(f"  dropped {embeddings.shape[1] - len(emb_keep)} constant embedding dim(s): "
               f"{np.setdiff1d(np.arange(embeddings.shape[1]), emb_keep).tolist()}")
 
-    stats = (exposure_mean, exposure_std, emb_keep, emb_mean, emb_std)
+    stats = (exposure_mean, exposure_std, emb_keep, emb_mean, emb_std, feature_mode)
     fit_ds = ActivityDataset(fit_df, embeddings, *stats)
     val_ds = ActivityDataset(val_df, embeddings, *stats)
     test_ds = ActivityDataset(test_df, embeddings, *stats)
@@ -204,7 +216,8 @@ def train_model(
 
     out_path = Path(out_dir) / file_name
     out_path.mkdir(parents=True, exist_ok=True)
-    ckpt_path = out_path / f"{encoder_name}_best.pt"
+    # Ablations get their own filename so they never overwrite the fused run.
+    ckpt_path = out_path / f"{encoder_name}{'' if feature_mode == 'fused' else f'_{feature_mode}'}_best.pt"
 
     best_val_loss, best_epoch, epochs_since_best = float("inf"), -1, 0
     t0 = time.time()
@@ -237,6 +250,7 @@ def train_model(
                     "hidden_dims": hidden_dims,
                     "dropout": dropout,
                     "encoder": encoder.name,
+                    "feature_mode": feature_mode,
                     "exposure_cols": EXPOSURE_COLS,
                     # Cast off pandas/numpy scalar types -- torch.load defaults to
                     # weights_only=True since 2.6, which only allowlists plain
@@ -268,6 +282,7 @@ def train_model(
 
     return {
         "encoder": encoder.name,
+        "feature_mode": feature_mode,
         "ckpt_path": ckpt_path,
         "best_epoch": best_epoch,
         "val_mse": best_val_loss,
@@ -318,6 +333,9 @@ if __name__ == "__main__":
     parser.add_argument("--patience", type=int, default=10, help="Early-stopping patience, in epochs without val improvement.")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--out_dir", type=str, default="./checkpoints")
+    parser.add_argument("--features", type=str, default="fused", choices=FEATURE_MODES,
+                        help="Feature blocks reaching the head. 'physics' and 'embedding' are the "
+                             "evaluation-protocol ablations; lock 'physics' before believing any encoder result.")
     args = parser.parse_args()
 
     if args.encoder.strip().upper() == "ALL":
@@ -341,6 +359,7 @@ if __name__ == "__main__":
         patience=args.patience,
         seed=args.seed,
         out_dir=args.out_dir,
+        feature_mode=args.features,
     )
 
     if len(encoders) == 1:

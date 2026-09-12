@@ -62,12 +62,14 @@ def evaluate_checkpoint(ckpt_path: Path, file_path: str, device, val_frac: float
     train_df, test_df, embeddings = load_processed_splits(file_name, encoder)
     _, val_df = carve_validation_split(train_df, val_frac=val_frac, seed=seed)
 
+    feature_mode = ckpt.get("feature_mode", "fused")
     stats = (
         pd.Series(ckpt["exposure_mean"]),
         pd.Series(ckpt["exposure_std"]),
         np.asarray(ckpt["emb_keep"], dtype=int),
         np.asarray(ckpt["emb_mean"], dtype=np.float32),
         np.asarray(ckpt["emb_std"], dtype=np.float32),
+        feature_mode,
     )
     val_ds = ActivityDataset(val_df, embeddings, *stats)
     test_ds = ActivityDataset(test_df, embeddings, *stats)
@@ -82,9 +84,10 @@ def evaluate_checkpoint(ckpt_path: Path, file_path: str, device, val_frac: float
 
     return {
         "encoder": encoder.name,
+        "feature_mode": feature_mode,
         "hf_id": encoder.value,
         "slug": encoder.value.split("/")[-1],
-        "emb_dim": ckpt["input_dim"] - n_exposure,
+        "emb_dim": ckpt["input_dim"] - (n_exposure if feature_mode != "embedding" else 0),
         "input_dim": ckpt["input_dim"],
         "hidden_dims": "x".join(map(str, ckpt["hidden_dims"])),
         "dropout": ckpt["dropout"],
